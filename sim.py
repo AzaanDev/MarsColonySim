@@ -334,7 +334,7 @@ class Colony:
         self.population -= 1
 
         # Log the death
-        print(f"[Time {self.time:.2f}] Colonist {colonist.id} has died.")
+
 
         # Check if the population has reached zero
         if self.population == 0:
