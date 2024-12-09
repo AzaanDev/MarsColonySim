@@ -91,18 +91,21 @@ class Colony:
                 initial_amount=initial_population * days_of_reserve * 2.0,
                 base_consumption_rate=1.0,
                 recycling_efficiency=0.8,
+                capacity=10000.0
             ),
             ResourceType.FOOD: Resource(
                 resource_type=ResourceType.FOOD,
                 initial_amount=initial_population * days_of_reserve * 2.0,
                 base_consumption_rate=1.0,
                 recycling_efficiency=0.0,
+                capacity=10000.0
             ),
             ResourceType.OXYGEN: Resource(
                 resource_type=ResourceType.OXYGEN,
                 initial_amount=initial_population * days_of_reserve * 2.0,
                 base_consumption_rate=1.0,
                 recycling_efficiency=0.8,
+                capacity=10000
             )
         }
 
@@ -225,26 +228,35 @@ class Colony:
         #print(event)
         self.time = event.time
         if event.event_type == "produce":
+            print("produce")
             self.handle_production(event.details)
         elif event.event_type == "consume":
+            print("consume")
             self.handle_consumption(event.details)
         elif event.event_type == "storage_check":
+            print("storage check")
             self.handle_storage()
         elif event.event_type == "transition":
+            print("transition")
             self.handle_transitions(event.details)
         elif event.event_type == "birth":
+            print("birth")
             self.handle_birth()
         elif event.event_type == "risk":
+            print("risk")
             self.handle_risk_event()
             if int(self.time) % 100 == 0:  # Every 100 time units
-                self.schedule_risk_events(interval=100, lambda_rate=2)
+                self.schedule_risk_events(interval=100, lambda_rate=0.5)
         elif event.event_type == "death":
+            print("death")
             self.handle_death(event.details)
         elif event.event_type == "death_check":
+            print("death check")
             self.schedule_death_events()
             next_check_time = self.time + 10  # Reschedule the next death check
             heapq.heappush(self.event_queue, Event(next_check_time, "death_check"))
         elif event.event_type == "resource_node_discovery":
+            print("resource node discovery")
             self.handle_resource_node_discovery()
             
     def handle_storage(self):
@@ -294,6 +306,8 @@ class Colony:
         heapq.heappush(self.event_queue, birth_event)
 
     def handle_transitions(self, colonist):
+        if colonist.id not in self.Children and colonist.id not in self.Adults and colonist.id not in self.Elders:
+            return
         age_state = colonist.age # 0 is child & 1 is adult
 
         transition_actions = {
@@ -309,6 +323,9 @@ class Colony:
 
     def transition_child_to_adult(self, colonist):
         # Handle the transition from child to adult
+        if colonist.id not in self.Children:
+            return
+        print("transition c to a, ", colonist)
         colonist.age_up()
         self.child_population -= 1
         self.adult_population += 1
@@ -328,6 +345,9 @@ class Colony:
 
     def transition_adult_to_elder(self, colonist):
         # Handle the transition from adult to elder
+        if colonist.id not in self.Adults:
+            return
+        print("transition a to e, ", colonist)
         colonist.age_up()
         self.adult_population -= 1
         self.elder_population += 1
@@ -341,11 +361,15 @@ class Colony:
         death_time = self.time + np.random.exponential(self.elder_death_rate)  # Death event for elder
         death_event = Event(death_time, "transition", colonist)
         heapq.heappush(self.elders_queue, death_event)
-        self.schedule_death_events()
+        
 
     def transition_elder_death(self, colonist):
+        if colonist.id not in self.Elders:
+            return
+        print("transition e to d, ", colonist)
         self.elder_population -= 1
         self.population -= 1
+        print("colonist:",self.Elders)
         del self.Elders[colonist.id]
 
 
@@ -433,14 +457,17 @@ class Colony:
         consumed = resource.consume(self.population, time_since_last_consumption)
         self.last_consumption_time[resource_type] = self.time
         # Check for potential deaths due to resource shortages
-        self.schedule_death_events()
         
         next_consumption_time = self.time + np.random.gamma(self.gamma_shape, self.gamma_scale)
         heapq.heappush(self.event_queue, Event(next_consumption_time, "consume", resource_type))
 
     def handle_death(self, colonist: Colonist):
+        if colonist.id not in self.Children and colonist.id not in self.Adults and colonist.id not in self.Elders:
+            return
+        print("handle death", colonist)
         if colonist.age == 0:  # Child
             self.child_population -= 1
+            
             del self.Children[colonist.id]
         elif colonist.age == 1:  # Adult
             self.adult_population -= 1
@@ -476,6 +503,7 @@ class Colony:
 
 
     def schedule_death_events(self, risk_event: bool = False):
+        print("scheduale death event")
         """Schedules death events based on resource depletion or random factors."""
         for colonist in list(self.Adults.values()) + list(self.Children.values()) + list(self.Elders.values()):
             death_probability = 0.001  # Base probability
@@ -501,6 +529,7 @@ class Colony:
             heapq.heappush(self.event_queue, death_event)
         
     def schedule_risk_events(self, interval: int = 100, lambda_rate: float = 0.5):
+        print("schedule risk event")
         num_risks = np.random.poisson(lambda_rate)  # Number of risk events in the interval
         for _ in range(num_risks):
             # Randomly distribute the events within the interval
