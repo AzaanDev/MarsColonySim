@@ -2,8 +2,6 @@ from typing import List, Optional
 from resource_types import ResourceType
 from skill import Skill
 
-
-
 class Colonist:
     def __init__(
         self, 
@@ -51,13 +49,28 @@ class Colonist:
         self.determine_highest_score = self.determine_highest_score()
     
     def determine_highest_score(self) -> ResourceType:
-        return max(self.skills, key=self.skills.get)
+        skills = {
+            ResourceType.WATER: self.water_skill.value,
+            ResourceType.FOOD: self.food_skill.value,
+            ResourceType.OXYGEN: self.oxygen_skill.value
+        }
+        return max(skills, key=skills.get)
 
     def get_skill_for_resource(self, resource_type: ResourceType) -> int:
-        return self.skill_map.get(resource_type, Skill('default')).value
+        skill_map = {
+            ResourceType.WATER: self.water_skill,
+            ResourceType.FOOD: self.food_skill,
+            ResourceType.OXYGEN: self.oxygen_skill
+        }
+        return skill_map.get(resource_type, Skill('default')).value
 
     def gain_skill(self, resource_type: ResourceType, worker_count: int):
-        skill = self.skill_map.get(resource_type)
+        skill_map = {
+            ResourceType.WATER: self.water_skill,
+            ResourceType.FOOD: self.food_skill,
+            ResourceType.OXYGEN: self.oxygen_skill
+        }
+        skill = skill_map.get(resource_type)
         if skill:
             skill.gain_experience(1.0, worker_count)
 
@@ -78,5 +91,5 @@ class Colonist:
             f"Colonist {self.id} (Age: {self.age}) - "
             f"Water: {self.water_skill}, "
             f"Food: {self.food_skill}, "
-            f"Oxygen: {self.oxygen_skill}"
+            f"Oxygen: {self.oxygen_skill}\n"
         )

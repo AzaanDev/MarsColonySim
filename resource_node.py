@@ -9,7 +9,7 @@ class ResourceNode:
         self, 
         resource_type: ResourceType, 
         base_extraction_rate: float = 10.0,
-        capacity: float = 5000.0,
+        capacity: float = 10000.0,
         difficulty_factor: float = 1.0, 
         extraction_variance: float = 0.1,
         equipment_reliability: float = 0.9
@@ -24,10 +24,9 @@ class ResourceNode:
     def extract_resources(self, num_workers: int, avg_skill_score: int) -> float:
         extraction = (
             self.base_extraction_rate * 
-            num_workers * self.difficulty_factor * (0.5 + (avg_skill_score / 100))
+            num_workers * avg_skill_score
         )
-        
-        extraction *= np.random.gamma(1.0, self.extraction_variance)
+        #extraction *= np.random.gamma(1.0, self.extraction_variance)
         extraction = min(extraction, self.current_capacity)
         self.current_capacity -= extraction
         return max(0.0, extraction)
