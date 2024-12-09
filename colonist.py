@@ -29,9 +29,25 @@ class Colonist:
             'oxygen', 
             initial_value=oxygen_score
         )
-        
-        self.determine_highest_score = self.determine_highest_score()
+        # Initialize skills
+        self.water_skill = Skill('water', initial_value=water_score)
+        self.food_skill = Skill('food', initial_value=food_score)
+        self.oxygen_skill = Skill('oxygen', initial_value=oxygen_score)
 
+        # Create skill mappings
+        self.skills = {
+            ResourceType.WATER: self.water_skill.value,
+            ResourceType.FOOD: self.food_skill.value,
+            ResourceType.OXYGEN: self.oxygen_skill.value
+        }
+
+        self.skill_map = {
+            ResourceType.WATER: self.water_skill,
+            ResourceType.FOOD: self.food_skill,
+            ResourceType.OXYGEN: self.oxygen_skill
+        }
+        self.determine_highest_score = self.determine_highest_score()
+    
     def determine_highest_score(self) -> ResourceType:
         skills = {
             ResourceType.WATER: self.water_skill.value,
@@ -58,7 +74,7 @@ class Colonist:
         if skill:
             skill.gain_experience(1.0, worker_count)
 
-    def change_job(self, resource_type: ResourceType):
+    def change_job(self, new_job, resource_type: ResourceType):
         self.current_job = new_job
 
     def age_up(self) -> int:
