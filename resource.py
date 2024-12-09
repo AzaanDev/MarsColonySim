@@ -17,9 +17,8 @@ class Resource:
         total_consumption = self.base_consumption_rate * num_people * time
         
         #Remove this maybe
-        consumption_variation = np.random.gamma(1.0, self.consumption_variation)
-        total_consumption *= consumption_variation
-
+        #consumption_variation = np.random.gamma(1.0, self.consumption_variation)
+        #total_consumption *= consumption_variation
 
         actual_consumption = min(total_consumption, self.amount)
         recycled_amount = actual_consumption * self.recycling_efficiency
