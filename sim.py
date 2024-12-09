@@ -22,7 +22,7 @@ class Event:
         "transition": 6,
         "resume": 7,
         "interaction": 8, #TODO
-        "resource_node_discovery": 9, #TODO
+        "resource_node_discovery": 9, 
     }
 
     def __init__(self, time, event_type, details=None):
@@ -70,7 +70,10 @@ class Colony:
         self.adult_birth_rate = 20
         self.elder_birth_rate = 200
         self.elder_death_rate = 50
+        self.discovery_rate = 100
         self.resource_production_rate = 10
+        self.gamma_shape = 5  
+        self.gamma_scale = 1
 
         # Event queue
         self.event_queue: List[Event] = []
@@ -86,7 +89,7 @@ class Colony:
                 resource_type=ResourceType.WATER,
                 initial_amount=initial_population * days_of_reserve * 2.0,
                 base_consumption_rate=1.0,
-                recycling_efficiency=0.3,
+                recycling_efficiency=0.8,
             ),
             ResourceType.FOOD: Resource(
                 resource_type=ResourceType.FOOD,
@@ -98,13 +101,13 @@ class Colony:
                 resource_type=ResourceType.OXYGEN,
                 initial_amount=initial_population * days_of_reserve * 2.0,
                 base_consumption_rate=1.0,
-                recycling_efficiency=0.4,
+                recycling_efficiency=0.8,
             )
         }
 
         # 3 Inital Production Nodes
         self.water_node = ResourceNode(ResourceType.WATER, base_extraction_rate=12, capacity=5000)
-        self.food_node = ResourceNode(ResourceType.FOOD, base_extraction_rate=10, capacity=4000)
+        self.food_node = ResourceNode(ResourceType.FOOD, base_extraction_rate=10, capacity=float('inf')) # Farm
         self.oxygen_node = ResourceNode(ResourceType.OXYGEN, base_extraction_rate=8, capacity=6000)
 
         self.resource_nodes = [self.water_node, self.food_node, self.oxygen_node]
@@ -120,7 +123,7 @@ class Colony:
         self.Adults = {i: Colonist(i, 1, np.random.randint(50, 91), np.random.randint(50, 91), np.random.randint(50, 91)) for i in range(initial_population)}
         self.Children = {} 
         self.Elders = {}    
-        self.initialize_jobs(20, 20, 10)
+        self.initialize_jobs(17, 17, 16)
         self.initialize_events()
    
     def initialize_jobs(self, water_workers: int, food_workers: int, oxygen_workers: int):
@@ -171,13 +174,17 @@ class Colony:
             heapq.heappush(self.adults_queue, transition_event)
 
         for resource_type, resource in self.inventory.items():
-            event_time = self.time + np.random.gamma(5, 1)
+            event_time = self.time + np.random.gamma(self.gamma_shape, self.gamma_scale)
             heapq.heappush(self.event_queue, Event(event_time, "consume", resource_type))
 
         for resource_node in self.worker_distribution.keys():
             production_time = self.time + np.random.exponential(self.resource_production_rate)  
             produce_event = Event(production_time, "produce", resource_node)
             heapq.heappush(self.event_queue, produce_event)
+
+        discovery_time = self.time + np.random.exponential(self.discovery_rate) 
+        discovery_event = Event(discovery_time, "resource_node_discovery", None)
+        heapq.heappush(self.event_queue, discovery_event)
 
      
 
@@ -227,9 +234,10 @@ class Colony:
             self.handle_death(event.details)
         #elif event.event_type == "interaction": #Score increase for childern 
             #self.handle_death()
+        elif event.event_type == "resource_node_discovery":
+            self.handle_resource_node_discovery()
 
     def handle_birth(self):
-        print("Birth")
         new_child_id = self.unique_id
         new_child = Colonist(new_child_id, 0, 0, 0, 0)
         self.population += 1
@@ -310,6 +318,11 @@ class Colony:
         self.inventory[resource_node.resource_type].amount += production
         #print(f"Produced {production:.2f} of {resource_node.resource_type} from {resource_node}.")
 
+        # Increase worker skill score
+        for worker_id in workers:  
+            worker = self.Adults[worker_id] 
+            worker.gain_skill(resource_node.resource_type, len(workers))
+
         # Check if the resource node is depleted
         if resource_node.current_capacity <= 0:
             print(f"ResourceNode {resource_node} is depleted and will be removed.")
@@ -330,6 +343,9 @@ class Colony:
         # Remove the node from the worker distribution dictionary
         if resource_node in self.worker_distribution:
             del self.worker_distribution[resource_node]
+
+        if resource_node in self.resource_nodes:
+            self.resource_nodes.remove(resource_node)
 
         print(f"Resource node {resource_node} removed from the system.")
 
@@ -378,8 +394,27 @@ class Colony:
         consumed = resource.consume(self.population, time_since_last_consumption)
         self.last_consumption_time[resource_type] = self.time
         #print(f"Consumption {resource_type}: {consumed}")
-        next_consumption_time = self.time + np.random.gamma(5, 1) 
+        next_consumption_time = self.time + np.random.gamma(self.gamma_shape, self.gamma_scale)
         heapq.heappush(self.event_queue, Event(next_consumption_time, "consume", resource_type))
+
+    def handle_resource_node_discovery(self):
+        new_resource_type = np.random.choice([ResourceType.WATER, ResourceType.OXYGEN])  
+        new_capacity = np.random.randint(2000, 10000)  # Random capacity range
+        new_base_rate = np.random.uniform(10, 15)  # Random base extraction rate
+        
+        # Create the new resource node
+        new_resource_node = ResourceNode(new_resource_type, base_extraction_rate=new_base_rate, capacity=new_capacity)
+        self.worker_distribution[new_resource_node] = []
+
+        # Add the node to the colony's list of resource nodes
+        self.resource_nodes.append(new_resource_node)
+        
+        #Reallocate Workers?
+
+        # Schedule next discovery event
+        next_discovery_time = self.time + np.random.exponential(self.discovery_rate) 
+        discovery_event = Event(next_discovery_time, "resource_node_discovery", None)
+        heapq.heappush(self.event_queue, discovery_event)
 
     '''
     def handle_death(self, colonist):
