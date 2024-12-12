@@ -6,13 +6,20 @@ class Colonist:
     def __init__(
         self, 
         id: int, 
-        age: int,
-        water_score: int,
-        food_score: int,
-        oxygen_score: int
+        gender: int,        # 0 is male, 1 is female
+        age_bracket: int = 0,   # Age Brackets: 0 = [0, 18), 1 = [18, 60), 2 = 60+ 
+        age: int = 0,           # 18 years == 216 months/ticks, 60 years == 720 months/ticks
+        water_score: int = 0,
+        food_score: int = 0,
+        oxygen_score: int = 0,
+        pregnant: bool = False,
     ):
         self.id = id
-        self.age = age
+        self.age = age 
+        # Age Brackets: 0 = [0, 18), 1 = [18, 60), 2 = 60+ 
+        # 18 years == 216 months/ticks, 60 years == 720 months/ticks
+        self.gender =  gender
+        self.age_bracket = age_bracket
         self.current_job = None
 
         self.water_skill = Skill(
@@ -76,15 +83,6 @@ class Colonist:
 
     def change_job(self, new_job, resource_type: ResourceType):
         self.current_job = new_job
-
-    def age_up(self) -> int:
-        if self.age < 3:
-            self.age += 1
-            if self.age == 2:
-                self.water_skill.value //= 2
-                self.food_skill.value //= 2
-                self.oxygen_skill.value //= 2
-        return self.age
 
     def __repr__(self):
         return (

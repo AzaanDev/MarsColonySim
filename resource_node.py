@@ -24,7 +24,7 @@ class ResourceNode:
     def extract_resources(self, num_workers: int, avg_skill_score: int) -> float:
         extraction = (
             self.base_extraction_rate * 
-            num_workers * avg_skill_score
+            num_workers * (0.5 + (avg_skill_score / 100))
         )
         #extraction *= np.random.gamma(1.0, self.extraction_variance)
         extraction = min(extraction, self.current_capacity)
