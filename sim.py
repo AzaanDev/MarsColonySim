@@ -1,21 +1,30 @@
 import numpy as np
 import heapq
 from typing import Dict, List
+import scipy.stats as stats
 from resource_types import ResourceType
 from resource_node import ResourceNode
-from resource import Resource
+from resources import Resource
 from colonist import Colonist
 
-# Gompertz distribution parameters
-beta = 0.0001  # Scale parameter
-gamma = 0.2    # Shape parameter
-# Survival function of the Gompertz model
-# Function to calculate the expected time until death from a given age in years
-def expected_time_until_death(age_in_years, beta, gamma):
-    return (1 / (beta * gamma)) * (np.exp(gamma * age_in_years) - 1)
+
+def generate_elder_death_time(c=1.0, scale=10.0, random_seed=None):
+    if random_seed is not None:
+        np.random.seed(random_seed)
+    
+    years_to_death = stats.gompertz.rvs(c, scale=scale)
+    
+    # Ensure non-negative lifetime
+    years_to_death = max(0, years_to_death)
+    
+    # Convert years to months
+    months_to_death = max(0, int(years_to_death * 12))
+    return months_to_death 
+
+
 
 class Colony:
-    def __init__(self, initial_population: int = 50, months_of_reserve: int = 6):
+    def __init__(self, initial_population: int = 50, months_of_reserve: int = 12, policy_level: int = 1):
         self.current_tick = 0 # Each tick is a month
         self.simulation_duration = 1200  # 100 years (1200 months)
 
@@ -30,7 +39,10 @@ class Colony:
         # Rates 
         self.birth_rate = 1
         self.death_rate = 0.1 # Affected by the amount of resources 
+        self.resource_node_discovery_rate = 0.01
 
+        self.reactive_behavior = self.set_policy(policy_level)
+        #Policy Level
         # Colonist management
         self.Children = {} 
         self.Adults = {
@@ -42,6 +54,7 @@ class Colony:
                 water_score=np.random.randint(50, 91),
                 food_score=np.random.randint(50, 91),
                 oxygen_score=np.random.randint(50, 91),
+                reactive_behavior=self.reactive_behavior,
             )
             for i in range(initial_population)
         }
@@ -51,14 +64,11 @@ class Colony:
         self.males = []
         self.females = []
         self.pregnant_females = []
-
-        # Populate males, females lists by iterating through adults
         for colonist in self.Adults.values():
             if colonist.gender == 0:
                 self.males.append(colonist.id)  # Append colonist's ID
             elif colonist.gender == 1:
                 self.females.append(colonist.id) 
-
 
         # Inventory management
         self.inventory: Dict[ResourceType, Resource] = {
@@ -66,7 +76,7 @@ class Colony:
                 resource_type=ResourceType.WATER,
                 initial_amount=initial_population * months_of_reserve,
                 base_consumption_rate=1.0,
-                recycling_efficiency=0.2,
+                recycling_efficiency=0.8,
             ),
             ResourceType.FOOD: Resource(
                 resource_type=ResourceType.FOOD,
@@ -78,7 +88,7 @@ class Colony:
                 resource_type=ResourceType.OXYGEN,
                 initial_amount=initial_population * months_of_reserve,
                 base_consumption_rate=1.0,
-                recycling_efficiency=0.2,
+                recycling_efficiency=0.8,
             )
         }
 
@@ -92,36 +102,32 @@ class Colony:
         self.elders_queue: List[tuple] = []    # Elder to Death
 
         # Resource nodes
-        self.water_node = ResourceNode(ResourceType.WATER, base_extraction_rate=12, capacity=5000)
-        self.food_node = ResourceNode(ResourceType.FOOD, base_extraction_rate=10, capacity=float('inf'))
-        self.oxygen_node = ResourceNode(ResourceType.OXYGEN, base_extraction_rate=8, capacity=6000)
-
+        self.water_node = ResourceNode(ResourceType.WATER, base_extraction_rate=5, capacity=1000)
+        self.food_node = ResourceNode(ResourceType.FOOD, base_extraction_rate=5, capacity=1000) # Farming
+        self.oxygen_node = ResourceNode(ResourceType.OXYGEN, base_extraction_rate=5, capacity=1000)
         self.resource_nodes = [self.water_node, self.food_node, self.oxygen_node]
 
-        # Worker distribution
-        self.worker_distribution: Dict[ResourceNode, List[int]] = {
-            self.water_node: [],
-            self.food_node: [],
-            self.oxygen_node: []
-        }
-
         self.initialize_age_transitions()
-        self.initialize_jobs(17, 17, 16)
 
 
     def simulate(self):
         print("Starting Tick-Based Colony Simulation")
         print("-" * 40)
 
-        while self.current_tick < self.simulation_duration:
+        while self.current_tick < self.simulation_duration and self.population > 0:
             self.print_colony_stats()
-            
+        
+            # Start of the Colony, Determine the problems or focus of the colonsits 
+            depletion_estimates = self.estimate_time_until_resource_depletion()
 
-            # Assign Work - Every Tick
+            # Assign Work - Every Tick, Each Agent decides what to do based on the current 
+            # inventory levels and their skills
+            self.step_children_elder()
+            worker_distribtuion, non_working_adults = self.step_adults(depletion_estimates)
 
-            # Monthly processes
-            # Update Resources Production - Consumption  
-            self.update_inventory()
+            # Update Inventory Production - Consumption  
+            self.resource_production(worker_distribtuion)
+            self.resource_consumption()
 
             # New Births
             self.process_births()
@@ -130,38 +136,100 @@ class Colony:
             # Age transitions
             self.process_age_transitions()
 
-            # Deaths
-            self.process_deaths()
+            # New Resource Node Discovery
+            self.resource_node_discovery()
 
-            # Change Behaviors and death rates for the next tick
-
-            # Increase Death Rate Based on Resource Depletion: If food is low, increase the death rate.
-
+            # Procress Deaths at start of tick, before any consumption or production
+            early_end = self.process_deaths()
 
             self.current_tick += 1
-
+            if early_end:
+                break
+        self.print_colony_stats()
         print("\nSimulation Completed")
 
+# Agent Functions
+
+    def set_policy(self, policy_level: int) -> float:
+        if policy_level == 1:
+            return 0.0
+        elif policy_level == 2:
+            return 0.25
+        elif policy_level == 3:
+            return 0.5
+        elif policy_level == 4:
+            return 0.75
+    
+    def step_children_elder(self):
+        if not self.Elders or not self.Children:  
+            return
+        
+        for child in self.Children.values():
+            elder = np.random.choice(list(self.Elders.values()))
+            child.food_skill.gain_experience(1 * elder.food_skill.value/100)
+            child.water_skill.gain_experience(1 * elder.water_skill.value/100)
+            child.oxygen_skill.gain_experience(1 * elder.oxygen_skill.value/100)
+
+
+    def step_adults(self, sorted_depletion_estimates):
+        worker_distribution = {resource_node: [] for resource_node in self.resource_nodes}
+        non_working_adults = 0 
+        # Adults step in a random order
+        adult_list = list(self.Adults.values())
+        np.random.shuffle(adult_list)
+    
+        for adult in adult_list:
+            if adult.pregnant:
+                continue
+
+            assigned = False
+            # Determine whether the adult will work on their primary task or contribute to the resource that runs out first
+            if np.random.uniform(0, 1) <  adult.reactive_behavior:
+                for resource_type, remaining_months in sorted_depletion_estimates.items():
+                    for resource_node in self.resource_nodes:
+                        if resource_node.resource_type == resource_type:
+                            # Prevent Overallocation using estimate remaining_capacity based on the current number of workers
+                            remaining_capacity = resource_node.current_capacity - (resource_node.base_extraction_rate * len(worker_distribution[resource_node]))
+                            if remaining_capacity > 0:
+                                worker_distribution[resource_node].append(adult.id)
+                                assigned = True
+                                break
+                    if assigned:
+                        break
+            else:
+                # Work on the primary task only
+                primary_task = adult.determine_highest_score()
+                for resource_node in self.resource_nodes:
+                    if resource_node.resource_type == primary_task:
+                        remaining_capacity = resource_node.current_capacity - (resource_node.base_extraction_rate * len(worker_distribution[resource_node]))
+                        if remaining_capacity > 0:
+                            worker_distribution[resource_node].append(adult.id)
+                            assigned = True
+                            break
+            if not assigned:
+                non_working_adults += 1
+        return worker_distribution, non_working_adults
+        
 # Resource Functions
 
-    def update_inventory(self):
-        self.resource_consumption()
-        self.resource_production()
+    def estimate_time_until_resource_depletion(self):
+        depletion_estimates = {}
+        for resource_type, resource in self.inventory.items():
+            remaining_months = resource.amount / (self.population * resource.base_consumption_rate)
+            depletion_estimates[resource_type] = remaining_months
+        sorted_depletion_estimates = dict(sorted(depletion_estimates.items(), key=lambda item: item[1]))
+        return sorted_depletion_estimates
 
     def resource_consumption(self):
         for resource_type, resource in self.inventory.items():
             resource.consume(self.population, 1)  
 
-    def resource_production(self):
-        # Temporary lists to store changes
-        workers_to_reassign = []
+    def resource_production(self, worker_distribtuion):
         nodes_to_remove = []
-
-        for resource_node, workers in self.worker_distribution.items():
+        for resource_node, workers in worker_distribtuion.items():
             avg_skill_score = self.calculate_average_skill(resource_node.resource_type, workers)
             production = resource_node.extract_resources(len(workers), avg_skill_score)
             self.inventory[resource_node.resource_type].amount += production
-
             for worker_id in workers:  
                 worker = self.Adults.get(worker_id)
                 if worker:
@@ -173,37 +241,23 @@ class Colony:
 
         # Remove depleted nodes
         for node in nodes_to_remove:
-            self.remove_resource_node(node)
+            if node in self.resource_nodes:
+                self.resource_nodes.remove(node)
 
-    def remove_resource_node(self, resource_node: ResourceNode):
-        # Reallocate workers before removing the node
-        if resource_node in self.worker_distribution:
-            self.reallocate_workers(resource_node)
-
-        # Remove the node from the worker distribution dictionary
-        if resource_node in self.worker_distribution:
-            del self.worker_distribution[resource_node]
-
-        if resource_node in self.resource_nodes:
-            self.resource_nodes.remove(resource_node)
-
-        print(f"Resource node {resource_node} removed from the system.")
-
-    def reallocate_workers(self, depleted_node: ResourceNode):
-        workers_to_reallocate = self.worker_distribution.pop(depleted_node, [])
-        print(f"Reallocating {len(workers_to_reallocate)} workers from {depleted_node}.")
+    def resource_node_discovery(self):
+        if np.random.uniform() < self.resource_node_discovery_rate:
+            resource_types = [ResourceType.WATER, ResourceType.FOOD, ResourceType.OXYGEN]
     
-        for worker_id in workers_to_reallocate:
-            # Try assigning the worker to another resource node
-            for target_node in self.worker_distribution.keys():
-                if target_node.current_capacity > 0:  # Only consider active nodes
-                    colonist = self.Adults.get(worker_id)
-                    if colonist:
-                        self.assign_worker_to_resource_node(colonist, target_node)
-                        print(f"Assigned worker {worker_id} to {target_node}.")
-                    break
-            else:
-                print(f"No available nodes to reassign worker {worker_id}. Worker remains idle.")
+            chosen_resource_type = np.random.choice(resource_types)
+    
+            if chosen_resource_type == ResourceType.WATER:
+                resource_node = ResourceNode(ResourceType.WATER, base_extraction_rate=5, capacity=1000)
+            elif chosen_resource_type == ResourceType.FOOD:
+                resource_node = ResourceNode(ResourceType.FOOD, base_extraction_rate=5, capacity=1000)
+            elif chosen_resource_type == ResourceType.OXYGEN:
+                resource_node = ResourceNode(ResourceType.OXYGEN, base_extraction_rate=5, capacity=1000)
+
+            self.resource_nodes.append(resource_node)
 
 # Age, birth, and death functions
 
@@ -223,15 +277,11 @@ class Colony:
         if np.random.uniform() > rate:
             return  
 
-        male_id = np.random.choice(self.males)
         female_id = np.random.choice(self.females)
-        male = self.Adults[male_id]
         female = self.Adults[female_id]
         female.pregnant = True
         self.pregnant_females.append(female.id)  
         self.females.remove(female.id)
-        colonist = self.Adults[female_id] 
-        self.remove_worker_from_resource_node(colonist)
         birth_tick = self.current_tick + 9 
         heapq.heappush(self.pregnancy_queue, (birth_tick, female.id))  
 
@@ -239,18 +289,18 @@ class Colony:
         while self.pregnancy_queue and self.pregnancy_queue[0][0] <= self.current_tick:
             birth_tick, colonist_id = heapq.heappop(self.pregnancy_queue)
             self.pregnant_females.remove(colonist_id)  
-            colonist = self.Adults[colonist_id] 
             self.females.append(colonist_id)
+
+            colonist = self.Adults[colonist_id] 
             colonist.pregnant = False
             child_id = self.unique_id
-            self.unique_id += 1
+            self.unique_id += 1 
             self.population += 1
             self.child_population += 1
-            child = Colonist( id=child_id, gender=np.random.randint(0, 1), )
+            child = Colonist(id=child_id, gender=np.random.randint(0, 1), reactive_behavior=self.reactive_behavior)
             self.Children[child_id] = child  
             transition_tick = self.current_tick + 216
-            heapq.heappush(self.adults_queue, (transition_tick, child_id))
-
+            heapq.heappush(self.children_queue, (transition_tick, child_id))
 
     def process_age_transitions(self):
         # Childern To Adults
@@ -277,7 +327,15 @@ class Colony:
         # Adults to elders
         while self.adults_queue and self.adults_queue[0][0] <= self.current_tick:
             transition_tick, colonist_id = heapq.heappop(self.adults_queue)
+            if colonist_id not in self.Adults:
+                continue
             adult = self.Adults.pop(colonist_id)  
+            if adult.pregnant:
+                delayed_transition_tick = self.current_tick + 9
+                heapq.heappush(self.adults_queue, (delayed_transition_tick, colonist_id))
+                self.Adults[colonist_id] = adult  
+                continue
+            
             adult.age = 720  
             adult.age_bracket = 2  
             self.adult_population -= 1
@@ -288,15 +346,8 @@ class Colony:
             elif adult.gender == 1:
                 self.females.remove(colonist_id) 
 
-            self.remove_worker_from_resource_node(adult)
-
-
-            # Schedule the transition to death using Gompertz distribution 
-            age_in_years = adult.age / 12  # Convert age in months to years
-            additional_years = expected_time_until_death(age_in_years, beta, gamma)
-
-            life_expectancy_ticks = int(additional_years * 12)  # Convert years to months
-            transition_tick = self.current_tick + (life_expectancy_ticks - adult.age)
+            life_expectancy_ticks = generate_elder_death_time()
+            transition_tick = self.current_tick + life_expectancy_ticks
             heapq.heappush(self.elders_queue, (transition_tick, colonist_id))
 
         # Elders Death
@@ -308,41 +359,12 @@ class Colony:
             self.population -= 1
 
     def process_deaths(self):
-
-
-# Job Functions
-
-    def initialize_jobs(self, water_workers: int, food_workers: int, oxygen_workers: int):
-        colonists = list(self.Adults.values())
+        # Immediate end to simulation since 1 tick is one month
+        if self.inventory[ResourceType.WATER].amount == 0 or self.inventory[ResourceType.OXYGEN].amount == 0:
+            return True
         
-        # Assign water workers
-        for i in range(water_workers):
-            colonist = colonists[i]
-            colonist.current_job = ResourceType.WATER
-            self.assign_worker_to_resource_node(colonist, self.water_node)
+        #if self.inventory[ResourceType.FOOD].amount == 0:
 
-        # Assign food workers
-        for i in range(food_workers):
-            colonist = colonists[water_workers + i]
-            colonist.current_job = ResourceType.FOOD
-            self.assign_worker_to_resource_node(colonist, self.food_node)
-
-        # Assign oxygen workers
-        for i in range(oxygen_workers):
-            colonist = colonists[water_workers + food_workers + i]
-            colonist.current_job = ResourceType.OXYGEN
-            self.assign_worker_to_resource_node(colonist, self.oxygen_node)
-
-    def assign_worker_to_resource_node(self, colonist: Colonist, resource_node: ResourceNode):
-        if resource_node not in self.worker_distribution:
-            self.worker_distribution[resource_node] = []
-        self.worker_distribution[resource_node].append(colonist.id)
-
-    def remove_worker_from_resource_node(self, colonist: Colonist):
-        for resource_node, colonists in self.worker_distribution.items():
-            if colonist.id in colonists:
-                colonists.remove(colonist.id)
-                break
 
 # Helper Functions
 

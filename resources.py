@@ -15,16 +15,13 @@ class Resource:
 
     def consume(self, num_people: int, time: int):
         total_consumption = self.base_consumption_rate * num_people * time
-        
-        #Remove this maybe
-        #consumption_variation = np.random.gamma(1.0, self.consumption_variation)
-        #total_consumption *= consumption_variatioSn
 
+        total_consumption *= np.random.gamma(1.0, self.consumption_variation)
 
-        actual_consumption = min(total_consumption, self.amount)
-        recycled_amount = actual_consumption * self.recycling_efficiency
-        self.amount -= actual_consumption - recycled_amount  # Deduct consumed amount (after recycling)
-        return actual_consumption
+        recycled_amount = total_consumption * self.recycling_efficiency
+        self.amount -= total_consumption - recycled_amount  # Deduct consumed amount (after recycling)
+        self.amount = max(0, self.amount)
+        return total_consumption - recycled_amount 
     
     def is_empty(self) -> bool:
         return self.amount <= 0
