@@ -138,13 +138,13 @@ class Colony:
 
             # New Resource Node Discovery
             self.resource_node_discovery()
-
+            risk_occurs = self.process_disaster()
             # Procress Deaths at start of tick, before any consumption or production
-            early_end = self.process_deaths()
-
+            early_end = self.process_deaths(is_Risk=risk_occurs)
             self.current_tick += 1
             if early_end:
                 break
+
         self.print_colony_stats()
         print("\nSimulation Completed")
 
@@ -358,12 +358,105 @@ class Colony:
             self.elder_population -= 1
             self.population -= 1
 
-    def process_deaths(self):
-        # Immediate end to simulation since 1 tick is one month
-        if self.inventory[ResourceType.WATER].amount == 0 or self.inventory[ResourceType.OXYGEN].amount == 0:
+    def process_deaths(self, is_Risk=False):
+        # Immediate end to simulation if critical resources are depleted
+        if self.inventory[ResourceType.WATER].amount <= 0 or self.inventory[ResourceType.OXYGEN].amount <= 0 or self.inventory[ResourceType.FOOD].amount <= 0:
+            print("Critical resource depletion! Simulation ends.")
             return True
+        if self.population <= 0:
+            return True  # No one left to process
+        # Base death rate
+        death_rate = 0.01
+
+        # Increase death rate if resources are below threshold
+        # for resource_type, resource in self.inventory.items():
+        #     if resource.amount < 500:  # Resource is critically low
+        #         death_rate += 0.05 #* (500 - resource.amount) / 500  # Proportional increase based on shortfall
+         # Calculate resource-based death rate adjustment
+        resource_death_chance = {
+            ResourceType.WATER: 1 - (self.inventory[ResourceType.WATER].amount / (self.population)),
+            ResourceType.FOOD: 1 - (self.inventory[ResourceType.FOOD].amount / (self.population)),
+            ResourceType.OXYGEN: 1 - (self.inventory[ResourceType.OXYGEN].amount / (self.population))
+        }
+
+        # Ensure chances are non-negative and calculate a multiplier
+        resource_multiplier = sum(max(0, chance) for chance in resource_death_chance.values())
+        death_rate *= (1 + resource_multiplier)  # Scale death rate based on resource shortages
+        # Increase death rate if colony is at risk
+        if is_Risk:
+            death_rate += 0.5
+
+        # Calculate the number of deaths using an exponential distribution
+        expected_deaths = int(self.population * death_rate)
+        number_of_deaths = min(expected_deaths, self.population)  # Ensure deaths don't exceed population
         
-        #if self.inventory[ResourceType.FOOD].amount == 0:
+        # Process deaths
+        all_colonists = list(self.Children.keys()) + list(self.Adults.keys()) + list(self.Elders.keys())
+        for _ in range(number_of_deaths):
+            if self.population <= 0:
+                break  # No one left to process
+
+            # Select a random colonist to die
+            chosen_id = np.random.choice(all_colonists)
+            all_colonists.remove(chosen_id)
+
+            # Remove the chosen colonist from the appropriate group
+            if chosen_id in self.Children:
+                del self.Children[chosen_id]
+                self.children_queue = [
+                    (tick, cid) for tick, cid in self.children_queue if cid != chosen_id
+                ]
+                heapq.heapify(self.children_queue)
+                self.child_population -= 1
+            elif chosen_id in self.Adults:
+                del self.Adults[chosen_id]
+                self.adults_queue = [
+                    (tick, cid) for tick, cid in self.adults_queue if cid != chosen_id
+                ]
+                heapq.heapify(self.adults_queue)
+                if chosen_id in self.males:
+                    self.males.remove(chosen_id)
+                elif chosen_id in self.females:
+                    self.females.remove(chosen_id)
+                self.pregnancy_queue = [
+                    (tick, cid) for tick, cid in self.pregnancy_queue if cid != chosen_id
+                ]
+                heapq.heapify(self.pregnancy_queue)
+                self.adult_population -= 1
+            elif chosen_id in self.Elders:
+                del self.Elders[chosen_id]
+                self.elders_queue = [
+                    (tick, cid) for tick, cid in self.elders_queue if cid != chosen_id
+                ]
+                heapq.heapify(self.elders_queue)
+                self.elder_population -= 1
+
+            # Reduce the total population
+            self.population -= 1
+        # Return False to indicate the simulation continues
+        return False
+
+    def process_disaster(self):
+        disaster_probability = 0.02
+        if np.random.uniform(0, 1) > disaster_probability:
+            return False  # No disaster this time
+
+        # Select a random resource to destroy
+        resource_types = list(self.inventory.keys())
+        selected_resource_type = np.random.choice(resource_types)
+        resource = self.inventory[selected_resource_type]
+        
+        amount_to_destroy = np.random.uniform(resource.amount * 0.5, resource.amount * 0.7)
+        resource.amount = max(0, resource.amount - amount_to_destroy)
+
+        print(f"Disaster occurred! {selected_resource_type.name} reduced by {amount_to_destroy:.2f} units.")
+
+        
+        #print(f"Death rate increased to {self.death_rate:.2f} due to the disaster.")
+
+        # Return a flag to indicate a disaster occurred
+        return True
+
 
 
 # Helper Functions
