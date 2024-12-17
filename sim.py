@@ -26,7 +26,7 @@ def generate_elder_death_time(c=1.0, scale=10.0, random_seed=None):
 class Colony:
     def __init__(self, initial_population: int = 50, months_of_reserve: int = 12, policy_level: int = 1):
         self.current_tick = 0 # Each tick is a month
-        self.simulation_duration = 1200  # 100 years (1200 months)
+        self.simulation_duration = 2400  # 100 years (1200 months)
 
         # Population management
         self.population = initial_population
@@ -39,7 +39,7 @@ class Colony:
         # Rates 
         self.birth_rate = 1
         self.death_rate = 0.1 # Affected by the amount of resources 
-        self.resource_node_discovery_rate = 0.01
+        self.resource_node_discovery_rate = 0.05
 
         self.reactive_behavior = self.set_policy(policy_level)
         #Policy Level
@@ -116,7 +116,7 @@ class Colony:
 
         while self.current_tick < self.simulation_duration and self.population > 0:
             self.print_colony_stats()
-        
+            
             # Start of the Colony, Determine the problems or focus of the colonsits 
             depletion_estimates = self.estimate_time_until_resource_depletion()
 
@@ -127,7 +127,7 @@ class Colony:
 
             # Update Inventory Production - Consumption  
             self.resource_production(worker_distribtuion)
-            self.resource_consumption()
+            d = self.resource_consumption()
 
             # New Births
             self.process_births()
@@ -140,10 +140,10 @@ class Colony:
             self.resource_node_discovery()
             risk_occurs = self.process_disaster()
             # Procress Deaths at start of tick, before any consumption or production
-            early_end = self.process_deaths(is_Risk=risk_occurs)
+            early_end = self.process_deaths(d)
             self.current_tick += 1
             if early_end:
-                break
+              break
 
         self.print_colony_stats()
         print("\nSimulation Completed")
@@ -221,8 +221,12 @@ class Colony:
         return sorted_depletion_estimates
 
     def resource_consumption(self):
+        deficits = {}
         for resource_type, resource in self.inventory.items():
-            resource.consume(self.population, 1)  
+            t, d = resource.consume(self.population, 1)  
+            if d < 0:  # If there's a deficit, log it
+                deficits[resource_type] = abs(d)
+        return deficits
 
     def resource_production(self, worker_distribtuion):
         nodes_to_remove = []
@@ -297,7 +301,7 @@ class Colony:
             self.unique_id += 1 
             self.population += 1
             self.child_population += 1
-            child = Colonist(id=child_id, gender=np.random.randint(0, 1), reactive_behavior=self.reactive_behavior)
+            child = Colonist(id=child_id, gender=np.random.randint(0, 2), reactive_behavior=self.reactive_behavior)
             self.Children[child_id] = child  
             transition_tick = self.current_tick + 216
             heapq.heappush(self.children_queue, (transition_tick, child_id))
@@ -358,34 +362,19 @@ class Colony:
             self.elder_population -= 1
             self.population -= 1
 
-    def process_deaths(self, is_Risk=False):
-        # Immediate end to simulation if critical resources are depleted
-        if self.inventory[ResourceType.WATER].amount <= 0 or self.inventory[ResourceType.OXYGEN].amount <= 0 or self.inventory[ResourceType.FOOD].amount <= 0:
-            print("Critical resource depletion! Simulation ends.")
-            return True
+    def process_deaths(self,deficits):
         if self.population <= 0:
             return True  # No one left to process
         # Base death rate
         death_rate = 0.01
 
-        # Increase death rate if resources are below threshold
-        # for resource_type, resource in self.inventory.items():
-        #     if resource.amount < 500:  # Resource is critically low
-        #         death_rate += 0.05 #* (500 - resource.amount) / 500  # Proportional increase based on shortfall
-         # Calculate resource-based death rate adjustment
-        resource_death_chance = {
-            ResourceType.WATER: 1 - (self.inventory[ResourceType.WATER].amount / (self.population)),
-            ResourceType.FOOD: 1 - (self.inventory[ResourceType.FOOD].amount / (self.population)),
-            ResourceType.OXYGEN: 1 - (self.inventory[ResourceType.OXYGEN].amount / (self.population))
-        }
-
-        # Ensure chances are non-negative and calculate a multiplier
-        resource_multiplier = sum(max(0, chance) for chance in resource_death_chance.values())
-        death_rate *= (1 + resource_multiplier)  # Scale death rate based on resource shortages
-        # Increase death rate if colony is at risk
-        if is_Risk:
-            death_rate += 0.5
-
+        if deficits:
+                for resource_type, deficit in deficits.items():
+                    # Scale death rate increase based on deficit severity
+                    # Example: Each unit of deficit adds 0.01 to the death rate
+                        death_rate += 0.01 * deficit / (self.population)  
+                
+        print(death_rate)
         # Calculate the number of deaths using an exponential distribution
         expected_deaths = int(self.population * death_rate)
         number_of_deaths = min(expected_deaths, self.population)  # Ensure deaths don't exceed population
@@ -500,7 +489,7 @@ class Colony:
 
 
 def main():
-    colony = Colony(initial_population=50)
+    colony = Colony(initial_population=50, policy_level=4)
     colony.simulate()
 
 if __name__ == "__main__":

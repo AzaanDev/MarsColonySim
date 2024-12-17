@@ -19,9 +19,11 @@ class Resource:
         total_consumption *= np.random.gamma(1.0, self.consumption_variation)
 
         recycled_amount = total_consumption * self.recycling_efficiency
+        
         self.amount -= total_consumption - recycled_amount  # Deduct consumed amount (after recycling)
+        defecint = self.amount
         self.amount = max(0, self.amount)
-        return total_consumption - recycled_amount 
+        return total_consumption - recycled_amount, defecint
     
     def is_empty(self) -> bool:
         return self.amount <= 0
