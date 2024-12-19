@@ -44,6 +44,13 @@ class Colonist:
             ResourceType.FOOD: self.food_skill,
             ResourceType.OXYGEN: self.oxygen_skill
         }
+
+        self.skill_history = {
+            'water_skill': [],
+            'food_skill': [],
+            'oxygen_skill': []
+        }
+
     
     def determine_highest_score(self) -> ResourceType:
         return max(self.skills, key=self.skills.get)
